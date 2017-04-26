@@ -19,8 +19,8 @@ flags.DEFINE_string('train_dir',   'cv',     'training directory (models and sum
 flags.DEFINE_string('load_model',   None,    '(optional) filename of the model to load. Useful for re-starting training from a checkpoint')
 
 # model params
-flags.DEFINE_string('model_choice',     'lstm',                         'model choice')
-flags.DEFINE_string('embedding_path',   None,                           'pretrained emebdding path')
+flags.DEFINE_string ('model_choice',    'lstm',                         'model choice')
+flags.DEFINE_string ('embedding_path',  None,                           'pretrained emebdding path')
 flags.DEFINE_integer('rnn_size',        650,                            'size of LSTM internal state')
 flags.DEFINE_integer('highway_layers',  2,                              'number of highway layers')
 flags.DEFINE_integer('word_embed_size', 50,                             'dimensionality of word embeddings')

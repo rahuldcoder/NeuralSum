@@ -7,20 +7,21 @@ import time
 import numpy as np
 import tensorflow as tf
 
-import model
-from data_reader import load_data, DataReader
+import model_abs as model
+from data_reader import load_data_abs, DataReader_abs
 
 
 flags = tf.flags
 
 # data
-flags.DEFINE_string('data_dir',    'data/demo',   'data directory. Should contain train.txt/valid.txt/test.txt with input data')
-flags.DEFINE_string('train_dir',   'cv',     'training directory (models and summaries are saved there periodically)')
-flags.DEFINE_string('load_model',   None,    '(optional) filename of the model to load. Useful for re-starting training from a checkpoint')
+flags.DEFINE_string ('data_dir',       'data/demo',   'data directory. Should contain train.txt/valid.txt/test.txt with input data')
+flags.DEFINE_string ('train_dir',      'cv',          'training directory (models and summaries are saved there periodically)')
+flags.DEFINE_string ('load_model',     None,          '(optional) filename of the model to load. Useful for re-starting training from a checkpoint')
+flags.DEFINE_boolean('use_abs',        True,          'do we use human summaries or the selected sentences as the target')
+flags.DEFINE_string ('embedding_path', None,          'pretrained emebdding path')
 
 # model params
-flags.DEFINE_string ('model_choice',    'lstm',                         'model choice')
-flags.DEFINE_string ('embedding_path',  None,                           'pretrained emebdding path')
+flags.DEFINE_string ('model_choice',    'bilstm',                       'model choice')
 flags.DEFINE_integer('rnn_size',        650,                            'size of LSTM internal state')
 flags.DEFINE_integer('highway_layers',  2,                              'number of highway layers')
 flags.DEFINE_integer('word_embed_size', 50,                             'dimensionality of word embeddings')
@@ -37,8 +38,9 @@ flags.DEFINE_float  ('param_init',          0.05, 'initialize parameters at')
 flags.DEFINE_integer('batch_size',          20,   'number of sequences to train on in parallel')
 flags.DEFINE_integer('max_epochs',          25,   'number of full passes through the training data')
 flags.DEFINE_float  ('max_grad_norm',       5.0,  'normalize gradients at')
-flags.DEFINE_integer('max_doc_length',      15,   'max_doc_length')
+flags.DEFINE_integer('max_doc_length',      15,   'maximum document length')
 flags.DEFINE_integer('max_sen_length',      50,   'maximum sentence length')
+flags.DEFINE_integer('max_output_length',   100,  'maximum word allowed in the summary')
 
 # bookkeeping
 flags.DEFINE_integer('seed',           3435, 'random number generator seed')
@@ -79,7 +81,7 @@ def load_wordvec(embedding_path, word_vocab):
     return initW
 
 
-def build_model(word_vocab, max_doc_length, train):
+def build_model(word_vocab, target_vocab, max_doc_length, max_output_length, train):
     my_model = None
     if train:
         pretrained_emb = None
@@ -105,42 +107,20 @@ def build_model(word_vocab, max_doc_length, train):
                                            max_doc_length=max_doc_length,
                                            dropout=FLAGS.dropout))
 
-            my_model.update(model.label_prediction(my_model.enc_outputs))
-            my_model.update(model.loss_extraction(my_model.logits, FLAGS.batch_size, max_doc_length))
-            my_model.update(model.training_graph(my_model.loss * max_doc_length,
+            my_model.update(model.attention_decoder(my_model.enc_outputs,
+                                       batch_size=FLAGS.batch_size,
+                                       num_rnn_layers=FLAGS.rnn_layers,
+                                       rnn_size=FLAGS.rnn_size,
+                                       enc_state_size=FLAGS.rnn_size * 2,
+                                       max_output_length=max_output_length,
+                                       dropout=FLAGS.dropout,
+                                       word_vocab_size=target_vocab.size,
+                                       word_embed_size=FLAGS.word_embed_size,
+                                       mode='train'))
+
+            my_model.update(model.loss_generation(my_model.logits, FLAGS.batch_size, max_output_length))
+            my_model.update(model.training_graph(my_model.loss * max_output_length,
                     FLAGS.learning_rate, FLAGS.max_grad_norm))
-
-        elif FLAGS.model_choice == 'lstm':
-            my_model = model.cnn_sen_enc(
-                    word_vocab_size=word_vocab.size,
-                    word_embed_size=FLAGS.word_embed_size,
-                    batch_size=FLAGS.batch_size,
-                    num_highway_layers=FLAGS.highway_layers,
-                    max_sen_length=FLAGS.max_sen_length,
-                    kernels=eval(FLAGS.kernels),
-                    kernel_features=eval(FLAGS.kernel_features),
-                    max_doc_length=max_doc_length,
-                    pretrained=pretrained_emb)
-
-            my_model.update(model.lstm_doc_enc(my_model.input_cnn,
-                                           batch_size=FLAGS.batch_size,
-                                           num_rnn_layers=FLAGS.rnn_layers,
-                                           rnn_size=FLAGS.rnn_size,
-                                           max_doc_length=max_doc_length,
-                                           dropout=FLAGS.dropout))
-
-            my_model.update(model.lstm_doc_dec(my_model.input_cnn, my_model.final_enc_state,
-                                           batch_size=FLAGS.batch_size,
-                                           num_rnn_layers=FLAGS.rnn_layers,
-                                           rnn_size=FLAGS.rnn_size,
-                                           max_doc_length=max_doc_length,
-                                           dropout=FLAGS.dropout))
-
-            my_model.update(model.label_prediction_att(my_model.enc_outputs, my_model.dec_outputs))
-            my_model.update(model.loss_extraction(my_model.logits, FLAGS.batch_size, max_doc_length))
-
-            my_model.update(model.training_graph(my_model.loss * max_doc_length,
-                    FLAGS.learning_rate, FLAGS.max_grad_norm))            
 
     else:
         if FLAGS.model_choice == 'bilstm':
@@ -152,7 +132,7 @@ def build_model(word_vocab, max_doc_length, train):
                     max_sen_length=FLAGS.max_sen_length,
                     kernels=eval(FLAGS.kernels),
                     kernel_features=eval(FLAGS.kernel_features),
-                    max_doc_length=max_doc_length)
+                    max_doc_length=FLAGS.max_doc_length)
 
             my_model.update(model.bilstm_doc_enc(my_model.input_cnn,
                                            batch_size=FLAGS.batch_size,
@@ -161,36 +141,17 @@ def build_model(word_vocab, max_doc_length, train):
                                            max_doc_length=max_doc_length,
                                            dropout=FLAGS.dropout))
 
-            my_model.update(model.label_prediction(my_model.enc_outputs))
-            my_model.update(model.loss_extraction(my_model.logits, FLAGS.batch_size, max_doc_length))
+            my_model.update(model.attention_decoder(my_model.enc_outputs,
+                                       batch_size=FLAGS.batch_size,
+                                       num_rnn_layers=FLAGS.rnn_layers,
+                                       rnn_size=FLAGS.rnn_size,
+                                       enc_state_size=FLAGS.rnn_size * 2,
+                                       max_output_length=max_output_length,
+                                       dropout=FLAGS.dropout,
+                                       word_vocab_size=target_vocab.size,
+                                       word_embed_size=FLAGS.word_embed_size,
+                                       mode='decode'))
 
-        elif FLAGS.model_choice == 'lstm':
-            my_model = model.cnn_sen_enc(
-                    word_vocab_size=word_vocab.size,
-                    word_embed_size=FLAGS.word_embed_size,
-                    batch_size=FLAGS.batch_size,
-                    num_highway_layers=FLAGS.highway_layers,
-                    max_sen_length=FLAGS.max_sen_length,
-                    kernels=eval(FLAGS.kernels),
-                    kernel_features=eval(FLAGS.kernel_features),
-                    max_doc_length=max_doc_length)
-
-            my_model.update(model.lstm_doc_enc(my_model.input_cnn,
-                                           batch_size=FLAGS.batch_size,
-                                           num_rnn_layers=FLAGS.rnn_layers,
-                                           rnn_size=FLAGS.rnn_size,
-                                           max_doc_length=max_doc_length,
-                                           dropout=FLAGS.dropout))
-
-            my_model.update(model.lstm_doc_dec(my_model.input_cnn, my_model.final_enc_state,
-                                           batch_size=FLAGS.batch_size,
-                                           num_rnn_layers=FLAGS.rnn_layers,
-                                           rnn_size=FLAGS.rnn_size,
-                                           max_doc_length=max_doc_length,
-                                           dropout=FLAGS.dropout))
-
-            my_model.update(model.label_prediction_att(my_model.enc_outputs, my_model.dec_outputs))
-            my_model.update(model.loss_extraction(my_model.logits, FLAGS.batch_size, max_doc_length))
     return my_model
 
 
@@ -201,16 +162,16 @@ def main(_):
         os.mkdir(FLAGS.train_dir)
         print('Created training directory', FLAGS.train_dir)
 
-    word_vocab, word_tensors, max_doc_length, label_tensors = \
-        load_data(FLAGS.data_dir, FLAGS.max_doc_length, FLAGS.max_sen_length)
+    word_vocab, word_tensors, max_doc_length, target_vocab, target_tensors, max_output_length = \
+      load_data_abs(FLAGS.data_dir, FLAGS.max_doc_length, FLAGS.max_sen_length, FLAGS.max_output_length, FLAGS.use_abs)
 
-    train_reader = DataReader(word_tensors['train'], label_tensors['train'],
+    train_reader = DataReader_abs(word_tensors['train'], target_tensors['train'],
                               FLAGS.batch_size)
 
-    valid_reader = DataReader(word_tensors['valid'], label_tensors['valid'],
+    valid_reader = DataReader_abs(word_tensors['valid'], target_tensors['valid'],
                               FLAGS.batch_size)
 
-    test_reader = DataReader(word_tensors['test'], label_tensors['test'],
+    test_reader = DataReader_abs(word_tensors['test'], target_tensors['test'],
                               FLAGS.batch_size)
 
     print('initialized all dataset readers')
@@ -224,14 +185,14 @@ def main(_):
         ''' build training graph '''
         initializer = tf.random_uniform_initializer(-FLAGS.param_init, FLAGS.param_init)
         with tf.variable_scope("Model", initializer=initializer):
-            train_model = build_model(word_vocab, max_doc_length, train=True)
+            train_model = build_model(word_vocab, target_vocab, max_doc_length, max_output_length-1, train=True)
 
         # create saver before creating more graph nodes, so that we do not save any vars defined below
         saver = tf.train.Saver(max_to_keep=50)
 
         ''' build graph for validation and testing (shares parameters with the training graph!) '''
         with tf.variable_scope("Model", reuse=True):
-            valid_model = build_model(word_vocab, max_doc_length, train=False)
+            valid_model = build_model(word_vocab, target_vocab, max_doc_length, max_output_length-1, train=False)
 
         if FLAGS.load_model:
             saver.restore(session, FLAGS.load_model)
@@ -260,6 +221,9 @@ def main(_):
                 count += 1
                 start_time = time.time()
 
+                y_input = y[:, 0:-1]
+                y_target = y[:, 1:]
+
                 loss, _, gradient_norm, step, _ = session.run([
                     train_model.loss,
                     train_model.train_op,
@@ -268,7 +232,8 @@ def main(_):
                     train_model.clear_word_embedding_padding
                 ], {
                     train_model.input  : x,
-                    train_model.targets: y,
+                    train_model.input_dec : y_input,
+                    train_model.targets : y_target,
                 })
 
                 avg_train_loss += 0.05 * (loss - avg_train_loss)
@@ -293,11 +258,15 @@ def main(_):
                 count += 1
                 start_time = time.time()
 
+                y_input = y[:, 0:-1]
+                y_target = y[:, 1:]
+
                 loss = session.run(
                     valid_model.loss
                 , {
                     valid_model.input  : x,
-                    valid_model.targets: y,
+                    valid_model.input_dec  : y_input,
+                    valid_model.targets: y_target,
                 })
 
                 if count % FLAGS.print_every == 0:

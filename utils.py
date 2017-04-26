@@ -1,4 +1,5 @@
 import numpy as np
+from contextlib import contextmanager
 
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""

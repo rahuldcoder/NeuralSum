@@ -20,11 +20,20 @@ Neural Network Summarizer
 ...* **RL feature-tuning**
 
 ## Dependencies
+Todo
 
 ## Quick-start
+* Pretrian a general-purpose encoder: ```python pretrain.py```
+* Training ```python train.py```
+* Evaluate ```python evaluate.py```
+
+## Visualize scores
+Sentence scores are stored during evaluation.
+
+![score.png](./assets/score.png)
+
 
 ## Citation
-If you use the code, please cite
 ```
 @InProceedings{cheng-lapata:2016:P16-1, 
   author = {Cheng, Jianpeng and Lapata, Mirella}, 
