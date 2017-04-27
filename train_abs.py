@@ -17,7 +17,7 @@ flags = tf.flags
 flags.DEFINE_string ('data_dir',       'data/demo',   'data directory. Should contain train.txt/valid.txt/test.txt with input data')
 flags.DEFINE_string ('train_dir',      'cv',          'training directory (models and summaries are saved there periodically)')
 flags.DEFINE_string ('load_model',     None,          '(optional) filename of the model to load. Useful for re-starting training from a checkpoint')
-flags.DEFINE_boolean('use_abs',        True,          'do we use human summaries or the selected sentences as the target')
+flags.DEFINE_boolean('use_abs',        False,          'do we use human summaries or the selected sentences as the target')
 flags.DEFINE_string ('embedding_path', None,          'pretrained emebdding path')
 
 # model params
@@ -82,6 +82,8 @@ def load_wordvec(embedding_path, word_vocab):
 
 
 def build_model(word_vocab, target_vocab, max_doc_length, max_output_length, train):
+    '''build a training or inference graph, based on the model choice'''
+
     my_model = None
     if train:
         pretrained_emb = None
@@ -107,7 +109,7 @@ def build_model(word_vocab, target_vocab, max_doc_length, max_output_length, tra
                                            max_doc_length=max_doc_length,
                                            dropout=FLAGS.dropout))
 
-            my_model.update(model.attention_decoder(my_model.enc_outputs,
+            my_model.update(model.vanilla_attention_decoder(my_model.enc_outputs,
                                        batch_size=FLAGS.batch_size,
                                        num_rnn_layers=FLAGS.rnn_layers,
                                        rnn_size=FLAGS.rnn_size,
@@ -141,7 +143,7 @@ def build_model(word_vocab, target_vocab, max_doc_length, max_output_length, tra
                                            max_doc_length=max_doc_length,
                                            dropout=FLAGS.dropout))
 
-            my_model.update(model.attention_decoder(my_model.enc_outputs,
+            my_model.update(model.vanilla_attention_decoder(my_model.enc_outputs,
                                        batch_size=FLAGS.batch_size,
                                        num_rnn_layers=FLAGS.rnn_layers,
                                        rnn_size=FLAGS.rnn_size,
@@ -151,6 +153,7 @@ def build_model(word_vocab, target_vocab, max_doc_length, max_output_length, tra
                                        word_vocab_size=target_vocab.size,
                                        word_embed_size=FLAGS.word_embed_size,
                                        mode='decode'))
+            my_model.update(model.loss_generation(my_model.logits, FLAGS.batch_size, max_output_length))
 
     return my_model
 
@@ -223,17 +226,20 @@ def main(_):
 
                 y_input = y[:, 0:-1]
                 y_target = y[:, 1:]
+                mask = np.greater(y_target, 0).astype(np.float32)
 
                 loss, _, gradient_norm, step, _ = session.run([
                     train_model.loss,
                     train_model.train_op,
                     train_model.global_norm,
                     train_model.global_step,
+                    #train_model.clear_target_embedding_padding,
                     train_model.clear_word_embedding_padding
                 ], {
                     train_model.input  : x,
                     train_model.input_dec : y_input,
                     train_model.targets : y_target,
+                    train_model.mask : mask
                 })
 
                 avg_train_loss += 0.05 * (loss - avg_train_loss)
@@ -253,21 +259,25 @@ def main(_):
             # epoch done: time to evaluate
             avg_valid_loss = 0.0
             count = 0
-            #rnn_state = session.run(valid_model.initial_rnn_state)
             for x, y in valid_reader.iter():
                 count += 1
                 start_time = time.time()
 
                 y_input = y[:, 0:-1]
                 y_target = y[:, 1:]
+                mask = np.greater(y_target, 0).astype(np.float32)
 
-                loss = session.run(
-                    valid_model.loss
-                , {
+                loss, outputs = session.run([
+                    valid_model.loss,
+                    valid_model.outputs
+               ] , {
                     valid_model.input  : x,
                     valid_model.input_dec  : y_input,
-                    valid_model.targets: y_target,
+                    valid_model.targets : y_target,
+                    valid_model.mask : mask
                 })
+
+                print (outputs)
 
                 if count % FLAGS.print_every == 0:
                     print("\t> validation loss = %6.8f, perplexity = %6.8f" % (loss, np.exp(loss)))

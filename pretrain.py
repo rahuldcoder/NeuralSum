@@ -69,6 +69,8 @@ def run_test(session, m, data, batch_size, num_steps):
 
 
 def load_wordvec(embedding_path, word_vocab):
+    '''loads pretrained word vectors'''
+
     initW = np.random.uniform(-0.25, 0.25, (word_vocab.size, FLAGS.word_embed_size))
     with open(embedding_path, "r") as f:
         for line in f:
@@ -80,6 +82,8 @@ def load_wordvec(embedding_path, word_vocab):
 
 
 def sparse2dense(x, vocab_size):
+    '''converts a sparse input to a dense representation, for computing the reconstruction loss'''
+
     x_dense = np.zeros([x.shape[0], x.shape[1], vocab_size], dtype=np.int32)
     for i in xrange(x.shape[0]):
         for j in xrange(x.shape[1]):
@@ -89,6 +93,8 @@ def sparse2dense(x, vocab_size):
 
 
 def build_model(word_vocab, train):
+    '''build a training or inference graph, based on the model choice'''
+
     my_model = None
     if train:
         pretrained_emb = None

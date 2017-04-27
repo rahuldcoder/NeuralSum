@@ -114,7 +114,7 @@ def cnn_sen_enc(word_vocab_size,
     input_ = tf.placeholder(tf.int32, shape=[batch_size, max_doc_length, max_sen_length], name="input")
 
     ''' First, embed words to sentence '''
-    with tf.variable_scope('Embedding'):
+    with tf.variable_scope('embedding'):
         if pretrained is not None:
             word_embedding = tf.get_variable(name='word_embedding', shape=[word_vocab_size, word_embed_size], 
                                        initializer=tf.constant_initializer(pretrained))
@@ -155,9 +155,11 @@ def bilstm_doc_enc(input_cnn,
                        rnn_size=650,
                        max_doc_length=35,
                        dropout=0.0):
-
-    # bilstm document encoder
-    with tf.variable_scope('BILSTMenc'):
+    '''
+    Bilstm document encoder
+    It constructs a list of sentence vectors in the document
+    '''
+    with tf.variable_scope('bilstm_enc'):
         def create_rnn_cell():
             cell = tf.contrib.rnn.BasicLSTMCell(rnn_size, state_is_tuple=True, forget_bias=0.0)
             if dropout > 0.0:
@@ -197,7 +199,7 @@ def lstm_doc_enc(input_cnn,
                    dropout=0.0):
 
     # lstm document encoder
-    with tf.variable_scope('LSTMenc'):
+    with tf.variable_scope('lstm_enc'):
         def create_rnn_cell():
             cell = tf.contrib.rnn.BasicLSTMCell(rnn_size, state_is_tuple=True, forget_bias=0.0)
             if dropout > 0.0:
@@ -224,25 +226,7 @@ def lstm_doc_enc(input_cnn,
     )
 
 
-
-
-def att_ffnn(dec_output, enc_outputs):
-    shape = enc_outputs.get_shape().as_list()
-    input_size = shape[-1]
-    v_att = tf.get_variable("v_att", shape=[input_size], dtype=tf.float32)
-    return tf.reduce_sum(v_att * tf.tanh(enc_outputs + tf.expand_dims(dec_output, 1)), [2])
-
-
-def attention(dec_output, encoder_outputs):
-    with tf.variable_scope('attention'):
-        scores = att_ffnn(dec_output, enc_outputs)
-        scores_normalized = tf.nn.softmax(scores)
-        context = tf.expand_dims(scores_normalized, 2) * enc_outputs
-        context = tf.reduce_sum(context, 1)
-        return scores_normalized, context
-
-
-def attention_decoder(enc_outputs,
+def vanilla_attention_decoder(enc_outputs,
                        batch_size=20,
                        num_rnn_layers=1,
                        rnn_size=80,
@@ -253,6 +237,7 @@ def attention_decoder(enc_outputs,
                        word_embed_size=50,
                        mode='train'):
 
+    ''' an attention decoder which does not support customized output layers'''
     input_dec = tf.placeholder(tf.int32, shape=[batch_size, max_output_length], name="input_dec")
 
     with tf.variable_scope('output_projection'):
@@ -301,6 +286,8 @@ def attention_decoder(enc_outputs,
               tf.nn.xw_plus_b(decoder_outputs[i], w, v))
 
     outputs = None
+    topk_log_probs = None
+    topk_ids = None
     if mode == 'decode':
         with tf.variable_scope('decode_output'):
           best_outputs = [tf.argmax(x, 1) for x in model_outputs]
@@ -320,16 +307,143 @@ def attention_decoder(enc_outputs,
     )
 
 
-def loss_generation(logits, batch_size, max_output_length):
+def _extract_argmax_and_embed(embedding, output_projection=None,
+                              update_embedding=True):
+    """Get a loop_function that extracts the previous symbol and embeds it.
+    Args:
+      embedding: embedding tensor for symbols.
+      output_projection: None or a pair (W, B). If provided, each fed previous
+        output will first be multiplied by W and added B.
+      update_embedding: Boolean; if False, the gradients will not propagate
+        through the embeddings.
+    Returns:
+      A loop function.
+    """
+    def loop_function(prev, _):
+        """function that feed previous model output rather than ground truth."""
+        if output_projection is not None:
+            prev = tf.nn.xw_plus_b(
+                prev, output_projection[0], output_projection[1])
+        prev_symbol = tf.argmax(prev, 1)
+        # Note that gradients will not propagate through the second parameter of
+        # embedding_lookup.
+        emb_prev = tf.nn.embedding_lookup(embedding, prev_symbol)
+        if not update_embedding:
+            emb_prev = tf.stop_gradient(emb_prev)
+        return emb_prev
+    return loop_function
 
+
+def flexible_attention_decoder(enc_outputs,
+                       batch_size=20,
+                       num_rnn_layers=1,
+                       rnn_size=80,
+                       enc_state_size=650,
+                       max_output_length=5,
+                       dropout=0.0,
+                       word_vocab_size=100,
+                       word_embed_size=50,
+                       mode='train'):
+    '''
+    FIX THIS
+    an attention decoder which supports customized output layers
+    '''
+    input_dec = tf.placeholder(tf.int32, shape=[batch_size, max_output_length], name="input_dec")
+    dec_input = [tf.squeeze(s, [1]) for s in tf.split(input_dec, max_output_length, 1)]
+
+    with tf.variable_scope('target_embedding'):
+            target_embedding = tf.get_variable(
+                'target_embedding', [word_vocab_size, word_embed_size], dtype=tf.float32,
+                initializer=tf.truncated_normal_initializer(stddev=1e-4))
+            clear_target_embedding_padding = tf.scatter_update(target_embedding, [0], tf.constant(0.0, shape=[1, word_embed_size]))
+
+            embed_dec_input = [tf.nn.embedding_lookup(target_embedding, x) for x in dec_input]
+
+
+    with tf.variable_scope('output_projection'):
+          w = tf.get_variable(
+              'w', [rnn_size, word_vocab_size], dtype=tf.float32,
+              initializer=tf.truncated_normal_initializer(stddev=1e-4))
+          w_t = tf.transpose(w)
+          v = tf.get_variable(
+              'v', [word_vocab_size], dtype=tf.float32,
+              initializer=tf.truncated_normal_initializer(stddev=1e-4))
+
+    with tf.variable_scope('lstm_dec'):
+        def create_rnn_cell():
+            cell = tf.contrib.rnn.BasicLSTMCell(rnn_size, state_is_tuple=True, forget_bias=0.0)
+            if dropout > 0.0:
+                cell = tf.contrib.rnn.DropoutWrapper(cell, output_keep_prob=1.-dropout)
+            return cell
+
+        if num_rnn_layers > 1:
+            cell = tf.contrib.rnn.MultiRNNCell([create_rnn_cell() for _ in range(num_rnn_layers)], state_is_tuple=True)
+        else:
+            cell = create_rnn_cell()
+
+        initial_rnn_state = cell.zero_state(batch_size, dtype=tf.float32)
+
+        enc_outputs = [tf.reshape(x, [batch_size, 1, enc_state_size])
+                           for x in enc_outputs]
+        enc_states = tf.concat(axis=1, values=enc_outputs)
+
+        initial_state_attention = (mode == 'decode')
+
+        loop_function = None
+        if mode == 'decode':
+            loop_function = _extract_argmax_and_embed(
+                target_embedding, (w, v), update_embedding=False)
+
+        decoder_outputs, dec_out_state = tf.contrib.legacy_seq2seq.attention_decoder(
+            embed_dec_input, initial_rnn_state, enc_states,
+            cell, num_heads=1, loop_function=loop_function, 
+            initial_state_attention=initial_state_attention)
+
+    with tf.variable_scope('output'):
+        model_outputs = []
+        for i in xrange(len(decoder_outputs)):
+          if i > 0:
+            tf.get_variable_scope().reuse_variables()
+          model_outputs.append(
+              tf.nn.xw_plus_b(decoder_outputs[i], w, v))
+
+    outputs = None
+    topk_log_probs = None
+    topk_ids = None
+    if mode == 'decode':
+        with tf.variable_scope('decode_output'):
+          best_outputs = [tf.argmax(x, 1) for x in model_outputs]
+          tf.logging.info('best_outputs%s', best_outputs[0].get_shape())
+          outputs = tf.concat(
+              axis=1, values=[tf.reshape(x, [batch_size, 1]) for x in best_outputs])
+
+          topk_log_probs, topk_ids = tf.nn.top_k(
+              tf.log(tf.nn.softmax(model_outputs[-1])), batch_size*2)
+
+    return adict(
+        input_dec = input_dec,
+        clear_target_embedding_padding = clear_target_embedding_padding,
+        logits = model_outputs,
+        outputs = outputs,
+        topk_log_probs = topk_log_probs,
+        topk_ids = topk_ids
+    )
+
+
+def loss_generation(logits, batch_size, max_output_length):
+    '''compute sequence generation loss'''
+    
     with tf.variable_scope('Loss'):
         targets = tf.placeholder(tf.int64, [batch_size, max_output_length], name='targets')
+        mask = tf.placeholder(tf.float32, [batch_size, max_output_length], name='mask')
         target_list = [tf.squeeze(x, [1]) for x in tf.split(targets, max_output_length, 1)]
+        mask_list = [tf.squeeze(x, [1]) for x in tf.split(mask, max_output_length, 1)]
 
-        loss = tf.reduce_mean(tf.nn.sparse_softmax_cross_entropy_with_logits(logits = logits, labels = target_list), name='loss')
+        loss = tf.contrib.legacy_seq2seq.sequence_loss(logits, target_list, mask_list)
 
     return adict(
         targets=targets,
+        mask=mask,
         loss=loss
     )
 
@@ -374,14 +488,14 @@ if __name__ == '__main__':
         with tf.variable_scope('Model'):
             graph = cnn_sen_enc(word_vocab_size=100)
             graph.update(bilstm_doc_enc(graph.input_cnn, dropout=0.5))
-            graph.update(attention_decoder(graph.enc_outputs, enc_state_size=1300))
+            graph.update(flexible_attention_decoder(graph.enc_outputs, enc_state_size=1300))
             graph.update(loss_generation(graph.logits, batch_size=20, max_output_length=35))
             graph.update(training_graph(graph.loss, learning_rate=1.0, max_grad_norm=5.0))
 
         with tf.variable_scope('Model', reuse=True):
             tgraph = cnn_sen_enc(word_vocab_size=100)
             tgraph.update(bilstm_doc_enc(tgraph.input_cnn, dropout=0.5))
-            tgraph.update(attention_decoder(tgraph.enc_outputs, enc_state_size=1300, mode='decode'))
+            tgraph.update(flexible_attention_decoder(tgraph.enc_outputs, enc_state_size=1300, mode='decode'))
 
 
         print('Model size is:', model_size())

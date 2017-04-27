@@ -211,7 +211,7 @@ def load_data_abs(data_dir, max_doc_length=10, max_sent_length=50, max_output_le
                     word_doc.append(word_array)
                  
                     if label == '1':
-                        ext_doc.extend(word_array)
+                        ext_doc.extend(word_array[1:-1])
  
                     if len(word_doc) == max_doc_length:
                         break
@@ -220,9 +220,10 @@ def load_data_abs(data_dir, max_doc_length=10, max_sent_length=50, max_output_le
 
                 word_tokens[fname].append(word_doc)
 
-                if len(ext_doc) > max_output_length:
-                    ext_doc = ext_doc[:max_output_length]
+                if len(ext_doc) > max_output_length - 2:
+                    ext_doc = ext_doc[:max_output_length-2]
 
+                ext_doc = [word_vocab['{']] + ext_doc + [word_vocab['}']]
                 ext_output[fname].append(ext_doc)
      
                 actual_max_ext_length = max(actual_max_ext_length, len(ext_doc))
@@ -230,7 +231,7 @@ def load_data_abs(data_dir, max_doc_length=10, max_sent_length=50, max_output_le
                 abs_doc = lines[2].replace('\n', ' ')
                 abs_doc = abs_doc.split(' ')
                 if len(abs_doc) > max_output_length - 2:
-                    abs_doc = abs_doc[:max_output_length - 2]
+                    abs_doc = abs_doc[:max_output_length-2]
 
                 abs_doc = [abs_vocab.feed(c) for c in ['{'] + abs_doc + ['}']]       
                 abs_output[fname].append(abs_doc)
