@@ -3,24 +3,27 @@ Neural Network Summarizer
 
 ## Features(to be included)
 * **Hierarchical encoder**
-...* **CNN sentence encoder**
-...* **LSTM document encoder**
-...* **Bidirectional LSTM document encoder**
+..* **CNN sentence encoder**
+..* **LSTM document encoder**
+..* **Bidirectional LSTM document encoder**
 * **Sentence extraction**
-...* **Extraction with LSTM decoder**
-...* **Prediction on top of BiLSTM encoder**
+..* **Extraction with LSTM decoder**
+..* **Prediction on top of BiLSTM encoder**
 * **Word generator**
-...* **Vanilla decoder**
-...* **Hierarchical attention decoder**
-...* **Beam-search decoder**
-...* **External language model**
+..* **Vanilla decoder**
+..* **Hierarchical attention decoder**
+..* **Beam-search decoder**
+..* **External language model**
 * **Post-process**
-...* **LR Ranker**
-...* **MERT feature-tuning**
-...* **RL feature-tuning**
+..* **LR Ranker**
+..* **MERT feature-tuning**
+..* **RL feature-tuning**
 
 ## Dependencies
-Todo
+* numpy
+* scipy
+* tensorflow
+* scikit-learn
 
 ## Quick-start
 * Data(https://docs.google.com/uc?id=0B0Obe9L1qtsnSXZEd0JCenIyejg&export=download)
