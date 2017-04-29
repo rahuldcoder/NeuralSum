@@ -1,9 +1,35 @@
 import numpy as np
 from contextlib import contextmanager
+import operator
 
-def softmax(x):
+def softmax(logits):
     """Compute softmax values for each sets of scores in x."""
-    return np.exp(x) / np.sum(np.exp(x), axis=1, keepdims=True)
+    return np.exp(logits) / np.sum(np.exp(logits), axis=1, keepdims=True)
+
+def argmax(prob):
+    """Return argmax id"""
+    prob = prob.ravel()
+    return np.argmax(prob)
+
+def topk(prob, k):
+    """Return top k id"""
+    prob = prob.ravel()
+    return (-prob).argsort()[:k]
+
+def random(prob):
+    """Return sampled id"""
+    prob = prob.ravel()
+    return np.random.choice(range(len(prob)), p=prob)
+
+def constrained(prob, restrictions, last_p):
+    """Return argmax under restricted vocab"""
+    prob = prob.ravel()
+    restrictions = restrictions.ravel()
+    sorted_prob = sorted(enumerate(prob), key=operator.itemgetter(1), reverse=True)
+    for p in sorted_prob:
+        # simple way to remove repetition
+        if p[0] != last_p and p[0] in restrictions:
+            return p[0]
 
 @contextmanager
 def open_files(names, mode='r'):

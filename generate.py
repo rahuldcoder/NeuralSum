@@ -6,6 +6,7 @@ import os
 import time
 import numpy as np
 import tensorflow as tf
+from utils import argmax, random, topk, constrained
 
 import model_abs as model
 from data_reader import load_data_abs, DataReader_abs
@@ -34,7 +35,7 @@ flags.DEFINE_integer('max_doc_length',      15,       'maximum document length')
 flags.DEFINE_integer('max_sen_length',      50,       'maximum sentence length')
 flags.DEFINE_integer('max_output_length',   100,      'maximum word allowed in the summary')
 flags.DEFINE_float  ('temperature',         1.0,      'sampling temperature')
-flags.DEFINE_string ('decode_choice',       'argmax',   'decode choice (argmax, beam or constrained)')
+flags.DEFINE_string ('decode_choice',       'constrained',   'decode choice (argmax, beam or constrained)')
 
 # bookkeeping
 flags.DEFINE_integer('seed',           3435, 'random number generator seed')
@@ -70,7 +71,7 @@ def build_model(word_vocab, target_vocab, max_doc_length, max_output_length):
             my_model = model.cnn_sen_enc(
                     word_vocab_size=word_vocab.size,
                     word_embed_size=FLAGS.word_embed_size,
-                    batch_size=FLAGS.batch_size,
+                    batch_size=1,
                     num_highway_layers=FLAGS.highway_layers,
                     max_sen_length=FLAGS.max_sen_length,
                     kernels=eval(FLAGS.kernels),
@@ -78,14 +79,14 @@ def build_model(word_vocab, target_vocab, max_doc_length, max_output_length):
                     max_doc_length=FLAGS.max_doc_length)
 
             my_model.update(model.bilstm_doc_enc(my_model.input_cnn,
-                                           batch_size=FLAGS.batch_size,
+                                           batch_size=1,
                                            num_rnn_layers=FLAGS.rnn_layers,
                                            rnn_size=FLAGS.rnn_size,
                                            max_doc_length=max_doc_length,
                                            dropout=0.0))
 
             my_model.update(model.vanilla_attention_decoder(my_model.enc_outputs,
-                                       batch_size=FLAGS.batch_size,
+                                       batch_size=1,
                                        num_rnn_layers=FLAGS.rnn_layers,
                                        rnn_size=FLAGS.rnn_size,
                                        enc_state_size=FLAGS.rnn_size * 2,
@@ -126,7 +127,7 @@ def main(_):
 
         ''' build inference graph '''
         with tf.variable_scope("Model"):
-            m = build_model(word_vocab, target_vocab, max_doc_length, max_output_length)
+            m = build_model(word_vocab, target_vocab, max_doc_length, 1)
             global_step = tf.Variable(0, dtype=tf.int32, name='global_step')
 
         saver = tf.train.Saver()
@@ -137,21 +138,35 @@ def main(_):
         save_file = open(save_as, 'w')
 
         for x, y in test_reader.iter():
+            for i in xrange(FLAGS.batch_size):
+                xi, yi = x[[i], :, :], y[[i], :]
 
-            logits, outputs = session.run([
-                m.logits,
-                m.outputs
-            ], {
-                m.input  : x,
-                m.input_dec  : y,
-            })
+                predicted_yi = yi[:, [0]]
+                last_ix = -1 # used in constrained          
 
-            for i in xrange(outputs.shape[0]):
-                summary = []
-                for j in xrange(outputs.shape[1]):
-                    summary.append(target_vocab.token(outputs[i][j]))
-                save_file.write(' '.join(summary) + '\n')
+                rnn_state = session.run(m.initial_dec_state) 
+                for i in xrange(max_output_length):
+                
+                    # this is slow, fix it  
+                    logits, rnn_state = session.run([m.logits, m.final_dec_state],
+                                                  {m.input_dec: predicted_yi,
+                                                   m.input  : xi,
+                                                   m.initial_dec_state: rnn_state})
 
+                    logits = np.array(logits)
+                    if FLAGS.decode_choice == 'argmax':
+                        ix = argmax(logits)
+                    elif FLAGS.decode_choice == 'constrained':
+                        ix = constrained(logits, xi, last_ix)
+
+                    predicted_yi = np.zeros((1, 1))
+                    predicted_yi[0, 0] = ix
+                    predicted_word = word_vocab.token(ix)
+                    last_ix = ix
+                    save_file.write(predicted_word + ' ')
+
+                save_file.write('\n' + ' ')
+    
         save_file.close()
 
 if __name__ == "__main__":

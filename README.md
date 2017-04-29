@@ -23,6 +23,7 @@ Neural Network Summarizer
 Todo
 
 ## Quick-start
+* Data(https://docs.google.com/uc?id=0B0Obe9L1qtsnSXZEd0JCenIyejg&export=download)
 * Pretrian a general-purpose encoder: ```python pretrain.py```
 * Training ```python train.py```
 * Evaluate ```python evaluate.py```
