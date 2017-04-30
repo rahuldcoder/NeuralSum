@@ -26,7 +26,7 @@ Neural Network Summarizer
 * scikit-learn
 
 ## Quick-start
-* Data(https://docs.google.com/uc?id=0B0Obe9L1qtsnSXZEd0JCenIyejg&export=download)
+* [Data](https://docs.google.com/uc?id=0B0Obe9L1qtsnSXZEd0JCenIyejg&export=download)
 * Pretrian a general-purpose encoder: ```python pretrain.py```
 * Training ```python train.py```
 * Evaluate ```python evaluate.py```
@@ -50,8 +50,8 @@ Sentence scores are stored during evaluation.
  }
 ```
 ## Reference
-* char-CNN-LSTM(https://github.com/carpedm20/lstm-char-cnn-tensorflow)
-* seq2seq implementation(https://github.com/tensorflow/models/blob/master/textsum/seq2seq_attention_model.py)
+* [char-CNN-LSTM](https://github.com/carpedm20/lstm-char-cnn-tensorflow)
+* [seq2seq](https://github.com/tensorflow/models/blob/master/textsum/seq2seq_attention_model.py)
 
 ## Liscense
 MIT
