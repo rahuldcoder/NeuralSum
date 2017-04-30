@@ -50,8 +50,8 @@ Sentence scores are stored during evaluation.
  }
 ```
 ## Reference
-* CNN-LSTM(link)
-* seq2seq implementation(link)
+* char-CNN-LSTM(https://github.com/carpedm20/lstm-char-cnn-tensorflow)
+* seq2seq implementation(https://github.com/tensorflow/models/blob/master/textsum/seq2seq_attention_model.py)
 
 ## Liscense
 MIT
